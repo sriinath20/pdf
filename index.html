@@ -1,0 +1,382 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local PDF Merger</title>
+    <!-- Tailwind CSS for Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF-Lib for local PDF manipulation -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    
+    <style>
+        /* Custom scrollbar for the file list */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        /* Drag active state */
+        .drag-active {
+            border-color: #4f46e5 !important;
+            background-color: #eef2ff !important;
+        }
+
+        /* Toast animation */
+        @keyframes slideIn {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .toast-enter {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-10">
+        <div class="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                </svg>
+                <h1 class="text-xl font-bold text-slate-900">MergePDF Local</h1>
+            </div>
+            <div class="text-sm text-slate-500 font-medium hidden sm:block">100% Private & Unlimited</div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col items-center py-10 px-4">
+        <div class="max-w-3xl w-full">
+            
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-extrabold text-slate-900 sm:text-4xl">Merge PDFs instantly.</h2>
+                <p class="mt-3 text-lg text-slate-600">Combine multiple PDF files into one. All processing happens locally in your browser—no uploads, no servers, no limits.</p>
+            </div>
+
+            <!-- Dropzone -->
+            <div id="dropzone" class="w-full bg-white border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 hover:border-indigo-400 hover:bg-slate-50 shadow-sm">
+                <!-- MULTIPLE attribute allows selecting many files at once in the dialog -->
+                <input type="file" id="fileInput" multiple accept="application/pdf" class="hidden">
+                
+                <div class="flex flex-col items-center pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-indigo-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    <p class="text-xl font-semibold text-slate-700">Click to select multiple files or drag & drop</p>
+                    <p class="text-sm text-slate-500 mt-2">Only .pdf files are supported. Hold Ctrl/Cmd to select many.</p>
+                </div>
+            </div>
+
+            <!-- File List Area -->
+            <div id="fileListContainer" class="hidden mt-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                    <h3 class="text-lg font-bold text-slate-800">Files to Merge (<span id="fileCount">0</span>)</h3>
+                    <div class="flex space-x-4">
+                        <button id="addMoreBtn" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                            </svg>
+                            Add More Files
+                        </button>
+                        <button id="clearAllBtn" class="text-sm text-red-500 hover:text-red-700 font-medium transition-colors flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Clear All
+                        </button>
+                    </div>
+                </div>
+                
+                <ul id="fileList" class="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-2">
+                    <!-- Files will be injected here via JS -->
+                </ul>
+
+                <!-- Action Button -->
+                <div class="mt-6 pt-6 border-t border-slate-100 flex justify-end">
+                    <button id="mergeBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-8 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span id="mergeBtnText">Merge PDFs</span>
+                        <svg id="mergeSpinner" class="hidden animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-6 mt-auto">
+        <div class="max-w-4xl mx-auto px-4 text-center text-slate-500 text-sm">
+            <p>Your files never leave your device. Merging is powered locally by <a href="https://pdf-lib.js.org/" target="_blank" class="text-indigo-600 hover:underline">pdf-lib</a>.</p>
+        </div>
+    </footer>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed bottom-6 right-6 z-50 flex flex-col space-y-3 pointer-events-none"></div>
+
+    <script>
+        // State Management
+        let selectedFiles = [];
+
+        // DOM Elements
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const fileList = document.getElementById('fileList');
+        const fileCount = document.getElementById('fileCount');
+        const addMoreBtn = document.getElementById('addMoreBtn');
+        const clearAllBtn = document.getElementById('clearAllBtn');
+        const mergeBtn = document.getElementById('mergeBtn');
+        const mergeBtnText = document.getElementById('mergeBtnText');
+        const mergeSpinner = document.getElementById('mergeSpinner');
+        const toastContainer = document.getElementById('toastContainer');
+
+        // --- Event Listeners ---
+
+        // Dropzone & File Selection interactions
+        dropzone.addEventListener('click', () => fileInput.click());
+        addMoreBtn.addEventListener('click', () => fileInput.click()); // Also open dialog
+
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('drag-active');
+        });
+
+        dropzone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-active');
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-active');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFiles(e.dataTransfer.files);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                handleFiles(e.target.files);
+            }
+            // Reset input so the same files can be selected again if removed
+            fileInput.value = '';
+        });
+
+        clearAllBtn.addEventListener('click', () => {
+            selectedFiles = [];
+            renderFileList();
+        });
+
+        mergeBtn.addEventListener('click', processMerge);
+
+        // --- Core Functions ---
+
+        function handleFiles(filesArray) {
+            const newFiles = Array.from(filesArray).filter(file => file.type === 'application/pdf');
+            
+            if (newFiles.length !== filesArray.length) {
+                showToast("Only PDF files are supported. Non-PDFs were ignored.", "warning");
+            }
+
+            if (newFiles.length === 0) return;
+
+            // Add new files to the existing state (Appending)
+            newFiles.forEach(file => {
+                selectedFiles.push({
+                    id: Math.random().toString(36).substring(7),
+                    file: file,
+                    name: file.name,
+                    size: formatBytes(file.size)
+                });
+            });
+
+            renderFileList();
+        }
+
+        function renderFileList() {
+            fileList.innerHTML = '';
+            fileCount.textContent = selectedFiles.length;
+
+            if (selectedFiles.length > 0) {
+                fileListContainer.classList.remove('hidden');
+                
+                // Enable merge button only if > 1 file
+                if (selectedFiles.length > 1) {
+                    mergeBtn.disabled = false;
+                    mergeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                } else {
+                    mergeBtn.disabled = true;
+                    mergeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+
+            } else {
+                fileListContainer.classList.add('hidden');
+                return;
+            }
+
+            selectedFiles.forEach((fileObj, index) => {
+                const li = document.createElement('li');
+                li.className = "flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors group";
+                
+                // Determine if move buttons should be disabled
+                const upDisabled = index === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-200 hover:text-slate-800 cursor-pointer';
+                const downDisabled = index === selectedFiles.length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-slate-200 hover:text-slate-800 cursor-pointer';
+
+                li.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600 flex-shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                        </div>
+                        <div class="flex flex-col min-w-0">
+                            <span class="text-sm font-semibold text-slate-800 truncate" title="${fileObj.name}">${fileObj.name}</span>
+                            <span class="text-xs text-slate-500">${fileObj.size}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-1 flex-shrink-0">
+                        <button onclick="moveFile(${index}, -1)" class="p-1.5 text-slate-500 rounded-md transition-colors ${upDisabled}" ${index === 0 ? 'disabled' : ''} title="Move Up">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>
+                        </button>
+                        <button onclick="moveFile(${index}, 1)" class="p-1.5 text-slate-500 rounded-md transition-colors ${downDisabled}" ${index === selectedFiles.length - 1 ? 'disabled' : ''} title="Move Down">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                        <button onclick="removeFile(${index})" class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors ml-2" title="Remove">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                    </div>
+                `;
+                fileList.appendChild(li);
+            });
+        }
+
+        // Global functions for inline onclick handlers
+        window.moveFile = (index, direction) => {
+            if (index + direction < 0 || index + direction >= selectedFiles.length) return;
+            const temp = selectedFiles[index];
+            selectedFiles[index] = selectedFiles[index + direction];
+            selectedFiles[index + direction] = temp;
+            renderFileList();
+        };
+
+        window.removeFile = (index) => {
+            selectedFiles.splice(index, 1);
+            renderFileList();
+        };
+
+        async function processMerge() {
+            if (selectedFiles.length < 2) {
+                showToast("Please add at least 2 PDFs to merge.", "warning");
+                return;
+            }
+
+            setLoadingState(true);
+
+            try {
+                // Initialize a new empty PDFDocument
+                const { PDFDocument } = PDFLib;
+                const mergedPdf = await PDFDocument.create();
+
+                // Process each file sequentially
+                for (let i = 0; i < selectedFiles.length; i++) {
+                    const fileObj = selectedFiles[i];
+                    
+                    try {
+                        // Read file as ArrayBuffer
+                        const arrayBuffer = await fileObj.file.arrayBuffer();
+                        
+                        // Load PDF document
+                        const pdf = await PDFDocument.load(arrayBuffer);
+                        
+                        // Copy all pages
+                        const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                        
+                        // Add pages to merged document
+                        copiedPages.forEach((page) => {
+                            mergedPdf.addPage(page);
+                        });
+                    } catch (err) {
+                        console.error(`Error processing file ${fileObj.name}:`, err);
+                        throw new Error(`Failed to read "${fileObj.name}". It might be encrypted or corrupted.`);
+                    }
+                }
+
+                // Serialize the PDFDocument to bytes
+                const mergedPdfBytes = await mergedPdf.save();
+
+                // Trigger download
+                const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `merged_${new Date().getTime()}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showToast("PDFs merged successfully!", "success");
+            } catch (error) {
+                console.error(error);
+                showToast(error.message || "An error occurred while merging PDFs.", "error");
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        // --- Utility Functions ---
+
+        function setLoadingState(isLoading) {
+            mergeBtn.disabled = isLoading;
+            if (isLoading) {
+                mergeBtnText.textContent = "Merging...";
+                mergeSpinner.classList.remove('hidden');
+                mergeBtn.classList.add('opacity-75', 'cursor-wait');
+            } else {
+                mergeBtnText.textContent = "Merge PDFs";
+                mergeSpinner.classList.add('hidden');
+                mergeBtn.classList.remove('opacity-75', 'cursor-wait');
+            }
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function showToast(message, type = "info") {
+            const toast = document.createElement('div');
+            
+            let bgClass = "bg-slate-800";
+            let icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+
+            if (type === "success") {
+                bgClass = "bg-emerald-800";
+                icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+            } else if (type === "error") {
+                bgClass = "bg-red-800";
+                icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+            } else if (type === "warning") {
+                bgClass = "bg-amber-800";
+                icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24"
