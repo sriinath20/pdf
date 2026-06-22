@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -67,11 +66,11 @@
                 <p class="mt-3 text-lg text-slate-600">Combine multiple PDF files into one. All processing happens locally in your browser—no uploads, no servers, no limits.</p>
             </div>
 
+            <!-- MULTIPLE attribute allows selecting many files at once in the dialog. Moved outside dropzone to prevent event bubbling issues -->
+            <input type="file" id="fileInput" multiple accept="application/pdf" class="hidden">
+
             <!-- Dropzone -->
             <div id="dropzone" class="w-full bg-white border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center cursor-pointer transition-all duration-200 hover:border-indigo-400 hover:bg-slate-50 shadow-sm">
-                <!-- MULTIPLE attribute allows selecting many files at once in the dialog -->
-                <input type="file" id="fileInput" multiple accept="application/pdf" class="hidden">
-                
                 <div class="flex flex-col items-center pointer-events-none">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-indigo-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -379,4 +378,25 @@
                 icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
             } else if (type === "warning") {
                 bgClass = "bg-amber-800";
-                icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24"
+                icon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>`;
+            }
+
+            toast.className = `toast-enter flex items-center p-4 rounded-lg shadow-lg text-white font-medium space-x-3 pointer-events-auto ${bgClass}`;
+            toast.innerHTML = `
+                ${icon}
+                <span>${message}</span>
+            `;
+
+            toastContainer.appendChild(toast);
+
+            // Remove toast after 4 seconds
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(100%)';
+                toast.style.transition = 'all 0.3s ease-in';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+    </script>
+</body>
+</html>
