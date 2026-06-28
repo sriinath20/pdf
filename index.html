@@ -105,7 +105,7 @@
                 </ul>
 
                 <!-- Action Button -->
-                <div class="mt-6 pt-6 border-t border-slate-100 flex justify-end">
+                <div class="mt-6 pt-6 border-t border-slate-100 flex flex-col items-end space-y-3">
                     <button id="mergeBtn" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-8 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
                         <span id="mergeBtnText">Merge PDFs</span>
                         <svg id="mergeSpinner" class="hidden animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -113,6 +113,7 @@
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                     </button>
+                    <div id="progressText" class="text-sm font-medium text-indigo-600 hidden">Preparing files...</div>
                 </div>
             </div>
 
@@ -144,6 +145,7 @@
         const mergeBtn = document.getElementById('mergeBtn');
         const mergeBtnText = document.getElementById('mergeBtnText');
         const mergeSpinner = document.getElementById('mergeSpinner');
+        const progressText = document.getElementById('progressText');
         const toastContainer = document.getElementById('toastContainer');
 
         // --- Event Listeners ---
@@ -286,50 +288,141 @@
                 return;
             }
 
-            setLoadingState(true);
+            setLoadingState(true, "Preparing to merge massive files...");
 
             try {
-                // Initialize a new empty PDFDocument
-                const { PDFDocument } = PDFLib;
-                const mergedPdf = await PDFDocument.create();
-
-                // Process each file sequentially
-                for (let i = 0; i < selectedFiles.length; i++) {
-                    const fileObj = selectedFiles[i];
+                // Extract JUST the File objects (not ArrayBuffers) to save immense amounts of memory
+                const filesToProcess = selectedFiles.map(f => f.file);
+                
+                // Create a Web Worker dynamically to completely free the main UI thread
+                const workerCode = `
+                    importScripts('https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js');
                     
-                    try {
-                        // Read file as ArrayBuffer
-                        const arrayBuffer = await fileObj.file.arrayBuffer();
-                        
-                        // Load PDF document
-                        const pdf = await PDFDocument.load(arrayBuffer);
-                        
-                        // Copy all pages
-                        const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-                        
-                        // Add pages to merged document
-                        copiedPages.forEach((page) => {
-                            mergedPdf.addPage(page);
+                    self.onmessage = async function(e) {
+                        const files = e.data.files;
+                        try {
+                            const { PDFDocument, PDFName } = PDFLib;
+                            const mergedPdf = await PDFDocument.create();
+                            
+                            for (let i = 0; i < files.length; i++) {
+                                self.postMessage({ type: 'progress', message: 'Processing file ' + (i + 1) + ' of ' + files.length + '...' });
+                                
+                                try {
+                                    // LAZY LOAD: Read the ArrayBuffer *one file at a time* directly off the disk
+                                    // This prevents the browser from crashing when handling 1GB+ of total files.
+                                    const arrayBuffer = await files[i].arrayBuffer();
+                                    const fileData = new Uint8Array(arrayBuffer);
+                                    
+                                    const pdf = await PDFDocument.load(fileData, { ignoreEncryption: true });
+                                    
+                                    // Strip interactive layers to avoid broken widget reference crashes
+                                    try {
+                                        pdf.catalog.delete(PDFName.of('AcroForm'));
+                                        const pages = pdf.getPages();
+                                        for (let p = 0; p < pages.length; p++) {
+                                            pages[p].node.delete(PDFName.of('Annots'));
+                                        }
+                                    } catch (cleanupErr) {
+                                        console.warn('Cleanup warning:', cleanupErr);
+                                    }
+                                    
+                                    const indices = pdf.getPageIndices();
+                                    if (indices.length > 0) {
+                                        try {
+                                            const copiedPages = await mergedPdf.copyPages(pdf, indices);
+                                            copiedPages.forEach((page) => mergedPdf.addPage(page));
+                                        } catch (copyErr) {
+                                            console.warn('Structural copy failed, falling back to flattening...', copyErr);
+                                            const embeddedPages = await mergedPdf.embedPdf(fileData, indices);
+                                            for (const embeddedPage of embeddedPages) {
+                                                const newPage = mergedPdf.addPage([embeddedPage.width, embeddedPage.height]);
+                                                newPage.drawPage(embeddedPage, { x: 0, y: 0, width: embeddedPage.width, height: embeddedPage.height });
+                                            }
+                                        }
+                                    }
+                                } catch (fileErr) {
+                                    throw new Error("Failed on '" + files[i].name + "'. It might be strictly password protected or corrupted.");
+                                }
+                            }
+                            
+                            self.postMessage({ type: 'progress', message: 'Finalizing 1GB+ PDF (This may take a moment)...' });
+                            const mergedPdfBytes = await mergedPdf.save();
+                            
+                            // Transfer the final buffer back to main thread using Zero-Copy transfer
+                            self.postMessage({ type: 'success', bytes: mergedPdfBytes }, [mergedPdfBytes.buffer]);
+                        } catch (error) {
+                            self.postMessage({ type: 'error', message: error.message });
+                        }
+                    };
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                const workerUrl = URL.createObjectURL(blob);
+                const worker = new Worker(workerUrl);
+
+                // Wrap worker execution in a promise
+                const mergedPdfBytes = await new Promise((resolve, reject) => {
+                    worker.onmessage = function(e) {
+                        if (e.data.type === 'progress') {
+                            setLoadingState(true, e.data.message);
+                        } else if (e.data.type === 'success') {
+                            resolve(e.data.bytes);
+                        } else if (e.data.type === 'error') {
+                            reject(new Error(e.data.message));
+                        }
+                    };
+                    
+                    worker.onerror = function(err) {
+                        reject(new Error("Worker thread crashed. The individual files might be too large for your browser's allocated memory."));
+                    };
+
+                    // Pass the raw File references. The worker will read them lazily!
+                    worker.postMessage({ files: filesToProcess });
+                });
+
+                // Clean up worker
+                worker.terminate();
+                URL.revokeObjectURL(workerUrl);
+
+                setLoadingState(true, "Saving massive file to your device...");
+
+                // Memory efficient save using the File System Access API (Direct streaming to Disk)
+                try {
+                    if (window.showSaveFilePicker) {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: `merged_${new Date().getTime()}.pdf`,
+                            types: [{
+                                description: 'PDF Document',
+                                accept: {'application/pdf': ['.pdf']},
+                            }],
                         });
-                    } catch (err) {
-                        console.error(`Error processing file ${fileObj.name}:`, err);
-                        throw new Error(`Failed to read "${fileObj.name}". It might be encrypted or corrupted.`);
+                        const writable = await handle.createWritable();
+                        await writable.write(mergedPdfBytes);
+                        await writable.close();
+                        
+                        showToast("PDF saved successfully!", "success");
+                        setLoadingState(false);
+                        return; // Exit here if streaming to disk worked
                     }
+                } catch (saveErr) {
+                    if (saveErr.name === 'AbortError') {
+                        setLoadingState(false);
+                        return; // User cancelled the save dialog
+                    }
+                    console.warn("File System API unavailable, falling back to Blob RAM download:", saveErr);
                 }
 
-                // Serialize the PDFDocument to bytes
-                const mergedPdfBytes = await mergedPdf.save();
-
-                // Trigger download
-                const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
-                const url = URL.createObjectURL(blob);
+                // Fallback: Standard Blob download (Note: High memory usage for 1GB files)
+                const finalBlob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(finalBlob);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = `merged_${new Date().getTime()}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                
+                setTimeout(() => URL.revokeObjectURL(url), 1000); // Cleanup
 
                 showToast("PDFs merged successfully!", "success");
             } catch (error) {
@@ -342,16 +435,19 @@
 
         // --- Utility Functions ---
 
-        function setLoadingState(isLoading) {
+        function setLoadingState(isLoading, message = "Processing...") {
             mergeBtn.disabled = isLoading;
             if (isLoading) {
-                mergeBtnText.textContent = "Merging...";
+                mergeBtnText.textContent = "Processing...";
                 mergeSpinner.classList.remove('hidden');
                 mergeBtn.classList.add('opacity-75', 'cursor-wait');
+                progressText.textContent = message;
+                progressText.classList.remove('hidden');
             } else {
                 mergeBtnText.textContent = "Merge PDFs";
                 mergeSpinner.classList.add('hidden');
                 mergeBtn.classList.remove('opacity-75', 'cursor-wait');
+                progressText.classList.add('hidden');
             }
         }
 
